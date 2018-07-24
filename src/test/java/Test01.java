@@ -32,6 +32,10 @@ public class Test01 {
             String value = config.getValue("database.port");
 
 
+            while(true){
+                System.currentTimeMillis();
+            }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
