@@ -19,7 +19,7 @@ public class ObserverFactory {
                             r.reject(p);
                         } else {
                             observer.WATCHED_PATH.put(parent.register(observer.watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), parent);
-                            observer.FILE_TIMESTAMP.put(p, p.toFile().lastModified());
+                            observer.TIMESTAMP.put(p, p.toFile().lastModified());
                         }
                     } catch (Exception e) {
                         r.reject(p);
@@ -40,9 +40,9 @@ public class ObserverFactory {
                             Thread.sleep(50);
                             for (WatchEvent<?> event : take.pollEvents()) {
                                 final Path fullPath = parent.resolve((Path) event.context());
-                                if (!observer.FILE_TIMESTAMP.keySet().contains(fullPath)) continue;
+                                if (!observer.TIMESTAMP.keySet().contains(fullPath)) continue;
                                 //ignore double update
-                                final Long lastModified = observer.FILE_TIMESTAMP.get(fullPath);
+                                final Long lastModified = observer.TIMESTAMP.get(fullPath);
                                 final long thisModified = fullPath.toFile().lastModified();
                                 if (lastModified != null && lastModified < thisModified) {
                                     try {
@@ -55,7 +55,7 @@ public class ObserverFactory {
                                         else if (StandardWatchEventKinds.ENTRY_CREATE.equals(kind))
                                             ((consumer = observer.createHandlers.get(fullPath)) == null ? observer.commonCreateHandler : consumer).accept(fullPath);
                                     } finally {
-                                        observer.FILE_TIMESTAMP.put(fullPath, thisModified);
+                                        observer.TIMESTAMP.put(fullPath, thisModified);
                                     }
                                 }
                             }

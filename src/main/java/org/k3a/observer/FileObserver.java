@@ -2,7 +2,6 @@ package org.k3a.observer;
 
 import java.nio.file.*;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -10,7 +9,7 @@ import java.util.function.Supplier;
  * on 2018/6/22  12:03
  */
 @SuppressWarnings({"unused", "WeakerAccess"})
-public class FileObserver extends Observer<Path, WatchService> {
+public class FileObserver extends LocalFileSystemObserver {
 
     private FileObserver() {
     }
@@ -57,26 +56,19 @@ public class FileObserver extends Observer<Path, WatchService> {
                     take = watchService.take();
                     final Path parent = WATCHED_PATH.get(take);
                     //ignore double update
-                    Thread.sleep(50);
+                    Thread.sleep(minInterval);
                     for (WatchEvent<?> event : take.pollEvents()) {
                         final Path fullPath = parent.resolve((Path) event.context());
                         //ignore non-registered
-                        if (!FILE_TIMESTAMP.keySet().contains(fullPath)) continue;
+                        if (!TIMESTAMP.keySet().contains(fullPath)) continue;
                         //ignore double update
-                        final Long lastModified = FILE_TIMESTAMP.get(fullPath);
+                        final Long lastModified = TIMESTAMP.get(fullPath);
                         final long thisModified = fullPath.toFile().lastModified();
                         if (lastModified != null && lastModified < thisModified) {
                             try {
-                                final WatchEvent.Kind<?> kind = event.kind();
-                                final Consumer<Path> consumer;
-                                if (StandardWatchEventKinds.ENTRY_MODIFY.equals(kind))
-                                    ((consumer = modifyHandlers.get(fullPath)) == null ? commonModifyHandler : consumer).accept(fullPath);
-                                else if (StandardWatchEventKinds.ENTRY_DELETE.equals(kind))
-                                    ((consumer = deleteHandlers.get(fullPath)) == null ? commonDeleteHandler : consumer).accept(fullPath);
-                                else if (StandardWatchEventKinds.ENTRY_CREATE.equals(kind))
-                                    ((consumer = createHandlers.get(fullPath)) == null ? commonCreateHandler : consumer).accept(fullPath);
+                                commonOnChangeHandler().accept(fullPath,event);
                             } finally {
-                                FILE_TIMESTAMP.put(fullPath, thisModified);
+                                TIMESTAMP.put(fullPath, thisModified);
                             }
                         }
                     }
@@ -95,14 +87,15 @@ public class FileObserver extends Observer<Path, WatchService> {
     @Override
     public BiConsumer<Path, RejectObserving<Path>> defaultRegistry() {
         return (path, reject) -> {
+            Path parent = path.getParent();
+            if (parent == null || !path.toFile().isFile()) {
+                reject.reject(path);
+                return;
+            }
+
             try {
-                Path parent = path.getParent();
-                if (parent == null || !path.toFile().isFile()) {
-                    reject.reject(path);
-                } else {
-                    WATCHED_PATH.put(parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), parent);
-                    FILE_TIMESTAMP.put(path, path.toFile().lastModified());
-                }
+                WATCHED_PATH.put(parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), parent);
+                TIMESTAMP.put(path, path.toFile().lastModified());
             } catch (Exception e) {
                 reject.reject(path);
             }

@@ -20,9 +20,13 @@ import java.util.function.Supplier;
 @SuppressWarnings({"WeakerAccess", "unused", "UnusedReturnValue"})
 public class Observer<O, W extends Closeable> {
 
+    protected volatile long minInterval = 50L;
+
+    protected volatile int bathSize = 1;
+
     protected final ConcurrentMap<WatchKey, O> WATCHED_PATH = new ConcurrentHashMap<>();
 
-    protected final ConcurrentMap<O, Long> FILE_TIMESTAMP = new ConcurrentHashMap<>();
+    protected final ConcurrentMap<O, Long> TIMESTAMP = new ConcurrentHashMap<>();
 
     protected final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
 
@@ -30,9 +34,11 @@ public class Observer<O, W extends Closeable> {
     protected final ConcurrentMap<O, Consumer<O>> deleteHandlers = new ConcurrentHashMap<>();
     protected final ConcurrentMap<O, Consumer<O>> createHandlers = new ConcurrentHashMap<>();
 
-    protected volatile Consumer<O> commonModifyHandler;
-    protected volatile Consumer<O> commonDeleteHandler;
-    protected volatile Consumer<O> commonCreateHandler;
+    protected volatile Consumer<O> commonModifyHandler = o -> System.out.printf("NOTICE:this message is printed due to no modify handler was set, event source:%s\n", o.toString());
+
+    protected volatile Consumer<O> commonDeleteHandler = o -> System.out.printf("NOTICE:this message is printed due to no delete handler was set, event source:%s\n", o.toString());
+
+    protected volatile Consumer<O> commonCreateHandler = o -> System.out.printf("NOTICE:this message is printed due to no create handler was set, event source:%s\n", o.toString());
 
     protected volatile RejectObserving<O> rejection = defaultRejection();
 
@@ -43,6 +49,17 @@ public class Observer<O, W extends Closeable> {
     protected volatile Runnable notifier = null;
 
     protected volatile BiConsumer<O, RejectObserving<O>> register = null;
+
+    //mill second
+    public Observer<O, W> setMinInterval(long ms) {
+        this.minInterval = ms;
+        return this;
+    }
+
+    public Observer<O, W> setBatchSize(int batch) {
+        this.bathSize = batch;
+        return this;
+    }
 
     @SuppressWarnings("unchecked")
     public Observer<O, W> register(O... observables) {

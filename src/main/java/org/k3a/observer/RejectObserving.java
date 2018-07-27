@@ -14,5 +14,8 @@ public interface RejectObserving<T> {
     final RejectObserving EXCEPTION = t -> {
         throw new IllegalArgumentException("error handling " + t + ",please check your parameter");
     };
+    final RejectObserving IGNORE = t -> {
+        System.out.printf("NOTICE:an error occur while registering %s and it won't be observed\n", t != null ? t.toString() : "null");
+    };
 }
 
