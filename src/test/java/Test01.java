@@ -14,14 +14,14 @@ public class Test01 {
     public static void main(String[] args) {
         try {
             Dynamically<Path, Properties, String, String> config = DynamicProperties.createWithSystemProps()
-                    .register(Paths.get(Test01.class.getResource("config.properties").getPath().substring(1)))
-                    .register(Paths.get(Test01.class.getResource("dynamic.properties").getPath().substring(1)));
+                    .link(Paths.get(Test01.class.getResource("config.properties").getPath().substring(1)))
+                    .link(Paths.get(Test01.class.getResource("dynamic.properties").getPath().substring(1)));
 
             config.activate();
 
-            config.register(Paths.get(Test01.class.getResource("test.properties").getPath().substring(1)));
+            config.link(Paths.get(Test01.class.getResource("test.properties").getPath().substring(1)));
             // which is not exists
-            config.register(Paths.get(Test01.class.getResource("").getPath().substring(1), "test01.properties"));
+            config.link(Paths.get(Test01.class.getResource("").getPath().substring(1), "test01.properties"));
 
             config.activate();
 

@@ -5,10 +5,11 @@ import java.io.IOException;
 import java.nio.file.WatchKey;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -17,65 +18,75 @@ import java.util.function.Supplier;
  * on 2018/6/29  14:17
  */
 @SuppressWarnings({"WeakerAccess", "unused", "UnusedReturnValue"})
-public abstract class Observer<O, W extends Closeable> {
+public class Observer<O, W extends Closeable> {
 
-    protected final Map<WatchKey, O> WATCHED_PATH = new ConcurrentHashMap<>();
+    protected final ConcurrentMap<WatchKey, O> WATCHED_PATH = new ConcurrentHashMap<>();
 
-    protected final Map<O, Long> FILE_TIMESTAMP = new ConcurrentHashMap<>();
+    protected final ConcurrentMap<O, Long> FILE_TIMESTAMP = new ConcurrentHashMap<>();
 
     protected final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
 
-    protected final Map<O, Consumer<O>> modifyHandlers = new ConcurrentHashMap<>();
-    protected final Map<O, Consumer<O>> deleteHandlers = new ConcurrentHashMap<>();
-    protected final Map<O, Consumer<O>> createHandlers = new ConcurrentHashMap<>();
+    protected final ConcurrentMap<O, Consumer<O>> modifyHandlers = new ConcurrentHashMap<>();
+    protected final ConcurrentMap<O, Consumer<O>> deleteHandlers = new ConcurrentHashMap<>();
+    protected final ConcurrentMap<O, Consumer<O>> createHandlers = new ConcurrentHashMap<>();
 
-    protected Consumer<O> commonModifyHandler;
-    protected Consumer<O> commonDeleteHandler;
-    protected Consumer<O> commonCreateHandler;
+    protected volatile Consumer<O> commonModifyHandler;
+    protected volatile Consumer<O> commonDeleteHandler;
+    protected volatile Consumer<O> commonCreateHandler;
 
-    protected W watchService;
+    protected volatile RejectObserving<O> rejection = defaultRejection();
 
-    protected Supplier<W> watchServiceSupplier = defaultWatchServiceSupplier();
+    protected volatile W watchService = defaultWatchServiceSupplier().get();
 
-    protected RejectObserving<O> rejection = defaultRejection();
+    protected volatile Supplier<W> watchServiceSupplier = null;
 
-    protected Runnable notifier = defaultNotifier();
+    protected volatile Runnable notifier = null;
+
+    protected volatile BiConsumer<O, RejectObserving<O>> register = null;
 
     @SuppressWarnings("unchecked")
-    public void watch(O... observables) throws Exception {
-        watch(rejection, observables);
+    public Observer<O, W> register(O... observables) {
+        return register(rejection, observables);
     }
 
     @SuppressWarnings("unchecked")
-    public void watch(RejectObserving<O> reject, O... observables) throws Exception {
+    public Observer<O, W> register(RejectObserving<O> reject, O... observables) {
         if (observables == null || observables.length == 0)
-            return;
-        watch(reject, Arrays.asList(observables));
+            return this;
+        return register(reject, Arrays.asList(observables));
     }
 
-    public void watch(Collection<O> paths) throws Exception {
-        watch(rejection, paths);
+    public Observer<O, W> register(Collection<O> paths) {
+        return register(rejection, paths);
     }
 
-    public void watch(RejectObserving<O> reject, Collection<O> observables) throws Exception {
+    public Observer<O, W> register(RejectObserving<O> reject, Collection<O> observables) {
         if (observables == null || observables.size() == 0)
-            return;
-        //stop previous round
-        if (watchService != null)
-            watchService.close();
-        //register paths
-        watchService = watchServiceSupplier.get();
+            return this;
         for (O o : observables)
-            addObservable(o, reject);
-        //start this round
-        EXECUTOR.execute(notifier);
+            register(o, reject);
+        return this;
     }
 
-    protected abstract void addObservable(O observable, RejectObserving<O> reject) throws Exception;
+    public Observer<O, W> register(O observable, RejectObserving<O> reject) {
+        (register == null ? register = defaultRegistry() : register).accept(observable, reject);
+        return this;
+    }
+
+    public void start() {
+        //start this round
+        EXECUTOR.execute(notifier == null ? notifier = defaultNotifier() : notifier);
+    }
 
     public void stop() throws IOException {
         if (watchService != null)
             watchService.close();
+    }
+
+    public void suspend() throws IOException {
+        stop();
+        //so that it can be recovered
+        watchService = watchServiceSupplier == null ? (watchServiceSupplier = defaultWatchServiceSupplier()).get() : watchServiceSupplier.get();
     }
 
     public Observer<O, W> onModify(Consumer<O> consumer) {
@@ -109,7 +120,7 @@ public abstract class Observer<O, W extends Closeable> {
     }
 
     /**
-     * use this to change watch service or override {@link Observer#defaultWatchServiceSupplier}
+     * use this to change link service or override {@link Observer#defaultWatchServiceSupplier}
      */
     public Observer<O, W> onWatch(Supplier<W> watchServiceSupplier) {
         this.watchServiceSupplier = watchServiceSupplier;
@@ -133,10 +144,11 @@ public abstract class Observer<O, W extends Closeable> {
     }
 
     /**
-     * override this to change watch service or use {@link Observer#onWatch}
+     * use this to change link or override {@link Observer#defaultRegistry()} ()}
      */
-    protected Supplier<W> defaultWatchServiceSupplier() {
-        return null;
+    public Observer<O, W> onRegister(BiConsumer<O, RejectObserving<O>> register) {
+        this.register = register;
+        return this;
     }
 
     /**
@@ -148,9 +160,23 @@ public abstract class Observer<O, W extends Closeable> {
     }
 
     /**
+     * override this to change link service or use {@link Observer#onWatch}
+     */
+    protected Supplier<W> defaultWatchServiceSupplier() {
+        throw new IllegalStateException("watchService is required but has not been set up yet!");
+    }
+
+    /**
      * override this to change notifier or use {@link Observer#onNotify(Runnable)}
      */
     protected Runnable defaultNotifier() {
-        return null;
+        throw new IllegalStateException("notifier is required but has not been set up yet!");
+    }
+
+    /**
+     * override this to change link or use {@link Observer#onRegister(BiConsumer)}
+     */
+    protected BiConsumer<O, RejectObserving<O>> defaultRegistry() {
+        throw new IllegalStateException("Register is required but has not been set up yet!");
     }
 }

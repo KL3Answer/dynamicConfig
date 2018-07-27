@@ -29,7 +29,7 @@ public class DynamicConfigFactory {
                     }
                 })
                 .onSearch((k, b) -> b.getProperty(k))
-                .onObserver(FileObserver.get())
+                .onObserve(FileObserver.get())
                 .onAppend((k, v, s) -> FileUtils.appendNewLine(k + "=" + v, s))
                 .onErase((k, s) -> {
                     try {

@@ -22,26 +22,26 @@ public class Dynamically<S, B, K, V> {
 
     protected final Map<S, B> VALUES = new ConcurrentHashMap<>();
 
-    protected Function<S, B> convertor = defaultConvertor();
+    protected volatile Consumer<Throwable> commonErrorHandler = defaultErrorHandler();
 
-    protected BiFunction<K, B, V> searcher = defaultSearcher();
+    protected volatile Function<S, B> convertor = null;
 
-    protected Observer<S, ? extends Closeable> observer = defaultObserver();
+    protected volatile BiFunction<K, B, V> searcher = null;
 
-    protected TriConsumer<K, V, S> appender = defaultAppender();
+    protected volatile Observer<S, ? extends Closeable> observer = null;
 
-    protected BiConsumer<K, S> eraser = defaultEraser();
+    protected volatile TriConsumer<K, V, S> appender = null;
 
-    protected Consumer<Throwable> commonErrorHandler = defaultErrorHandler();
+    protected volatile BiConsumer<K, S> eraser = null;
 
     protected volatile boolean isDynamic = false;
 
     /**
-     * add sources
+     * link sources
      */
-    public Dynamically<S, B, K, V> register(S s, Consumer<Throwable> errorHandler) {
+    public Dynamically<S, B, K, V> link(S s, Consumer<Throwable> errorHandler) {
         try {
-            B b = convertor.apply(s);
+            B b = (convertor == null ? convertor = defaultConvertor() : convertor).apply(s);
             VALUES.put(s, b);
         } catch (Throwable t) {
             VALUES.remove(s);
@@ -51,36 +51,36 @@ public class Dynamically<S, B, K, V> {
     }
 
     /**
-     * add sources
+     * link sources
      */
     @SuppressWarnings("unchecked")
-    public final Dynamically<S, B, K, V> register(S... sources) {
-        return register(commonErrorHandler, sources);
+    public final Dynamically<S, B, K, V> link(S... sources) {
+        return link(commonErrorHandler, sources);
     }
 
     /**
-     * add sources
+     * link sources
      */
-    public final Dynamically<S, B, K, V> register(Collection<S> sources) {
-        return register(commonErrorHandler, sources);
+    public final Dynamically<S, B, K, V> link(Collection<S> sources) {
+        return link(commonErrorHandler, sources);
     }
 
     /**
-     * add sources
+     * link sources
      */
     @SuppressWarnings("unchecked")
-    public Dynamically<S, B, K, V> register(Consumer<Throwable> errorHandler, S... sources) {
-        register(errorHandler, Arrays.asList(sources));
+    public Dynamically<S, B, K, V> link(Consumer<Throwable> errorHandler, S... sources) {
+        link(errorHandler, Arrays.asList(sources));
         return this;
     }
 
     /**
-     * add sources
+     * link sources
      */
-    public Dynamically<S, B, K, V> register(Consumer<Throwable> errorHandler, Collection<S> sources) {
+    public Dynamically<S, B, K, V> link(Consumer<Throwable> errorHandler, Collection<S> sources) {
         if (sources != null && sources.size() != 0)
             for (S file : sources)
-                register(file, errorHandler);
+                link(file, errorHandler);
         return this;
     }
 
@@ -94,9 +94,8 @@ public class Dynamically<S, B, K, V> {
                 inactivate();
 
             //start a new round
-            final Collection<S> sources = VALUES.keySet();
             //noinspection unchecked
-            (this.observer = observer).onModify(this::register).watch(sources);
+            (this.observer = observer).register(VALUES.keySet()).onModify(this::link).start();
             isDynamic = true;
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
@@ -108,7 +107,7 @@ public class Dynamically<S, B, K, V> {
      * start isDynamic registered paths
      */
     public Dynamically<S, B, K, V> activate() {
-        return activate(observer);
+        return activate(observer == null ? observer = defaultObserver() : observer);
     }
 
     /**
@@ -117,7 +116,7 @@ public class Dynamically<S, B, K, V> {
     public Dynamically<S, B, K, V> inactivate(Consumer<Throwable> errorHandler) {
         try {
             if (observer != null) {
-                observer.stop();
+                observer.suspend();
                 isDynamic = false;
             }
         } catch (Throwable t) {
@@ -170,7 +169,7 @@ public class Dynamically<S, B, K, V> {
     public V getExplicitValue(K key, S source, Consumer<Throwable> errorHandler) {
         try {
             B b = VALUES.get(source);
-            return searcher.apply(key, b);
+            return (searcher == null ? searcher = defaultSearcher() : searcher).apply(key, b);
         } catch (Throwable t) {
             errorHandler.accept(t);
         }
@@ -183,7 +182,7 @@ public class Dynamically<S, B, K, V> {
     public Dynamically<S, B, K, V> append(K k, V v, S s) {
         try {
             if (isDynamic && VALUES.get(s) != null)
-                appender.accept(k, v, s);
+                (appender == null ? appender = defaultAppender() : appender).accept(k, v, s);
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
         }
@@ -196,7 +195,7 @@ public class Dynamically<S, B, K, V> {
     public Dynamically<S, B, K, V> remove(K k, S s) {
         try {
             if (isDynamic && VALUES.get(s) != null)
-                eraser.accept(k, s);
+                (eraser == null ? eraser = defaultEraser() : eraser).accept(k, s);
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
         }
@@ -237,7 +236,7 @@ public class Dynamically<S, B, K, V> {
      * use this to change default file Observer
      * or override  {@link Dynamically#defaultObserver()}
      */
-    public Dynamically<S, B, K, V> onObserver(Observer<S, ? extends Closeable> observer) {
+    public Dynamically<S, B, K, V> onObserve(Observer<S, ? extends Closeable> observer) {
         if (observer != null)
             this.observer = observer;
         return this;
@@ -264,22 +263,6 @@ public class Dynamically<S, B, K, V> {
     }
 
     /**
-     * override this to decide how to covert file to B
-     * or use {@link Dynamically#onConvert(Function)}
-     */
-    protected Function<S, B> defaultConvertor() {
-        return s -> null;
-    }
-
-    /**
-     * override this to change default error handler,should return null when no suitable value was found
-     * or use {@link Dynamically#onSearch(BiFunction)}
-     */
-    protected BiFunction<K, B, V> defaultSearcher() {
-        return (k, b) -> null;
-    }
-
-    /**
      * override this to change default error handler
      * or use {@link Dynamically#onError(Consumer)}
      */
@@ -288,11 +271,27 @@ public class Dynamically<S, B, K, V> {
     }
 
     /**
+     * override this to decide how to covert file to B
+     * or use {@link Dynamically#onConvert(Function)}
+     */
+    protected Function<S, B> defaultConvertor() {
+        throw new IllegalStateException("convertor is required but has not been set up yet!");
+    }
+
+    /**
+     * override this to change default error handler,should return null when no suitable value was found
+     * or use {@link Dynamically#onSearch(BiFunction)}
+     */
+    protected BiFunction<K, B, V> defaultSearcher() {
+        throw new IllegalStateException("searcher is required but has not been set up yet!");
+    }
+
+    /**
      * override this to change default file Observer
-     * or use {@link Dynamically#onObserver(Observer)}
+     * or use {@link Dynamically#onObserve(Observer)}
      */
     protected Observer<S, ? extends Closeable> defaultObserver() {
-        return null;
+        throw new IllegalStateException("observer is required but has not been set up yet!");
     }
 
     /**
@@ -300,7 +299,7 @@ public class Dynamically<S, B, K, V> {
      * or use {@link Dynamically#onAppend(TriConsumer)}
      */
     protected TriConsumer<K, V, S> defaultAppender() {
-        return null;
+        throw new IllegalStateException("appender is required but has not been set up yet!");
     }
 
     /**
@@ -308,6 +307,6 @@ public class Dynamically<S, B, K, V> {
      * or use {@link Dynamically#onErase(BiConsumer)}
      */
     protected BiConsumer<K, S> defaultEraser() {
-        return null;
+        throw new IllegalStateException("eraser is required but has not been set up yet!");
     }
 }
