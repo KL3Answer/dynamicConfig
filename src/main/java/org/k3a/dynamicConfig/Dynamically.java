@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -34,7 +35,7 @@ public class Dynamically<S, B, K, V> {
 
     protected volatile BiConsumer<K, S> eraser = null;
 
-    protected volatile boolean isDynamic = false;
+    protected volatile AtomicBoolean isDynamic = new AtomicBoolean(false);
 
     /**
      * link sources
@@ -78,9 +79,8 @@ public class Dynamically<S, B, K, V> {
      * link sources
      */
     public Dynamically<S, B, K, V> link(Consumer<Throwable> errorHandler, Collection<S> sources) {
-        if (sources != null && sources.size() != 0)
-            for (S file : sources)
-                link(file, errorHandler);
+        for (S file : sources)
+            link(file, errorHandler);
         return this;
     }
 
@@ -90,13 +90,13 @@ public class Dynamically<S, B, K, V> {
     public Dynamically<S, B, K, V> activate(Observer<S, ? extends Closeable> observer) {
         try {
             // stop previous round
-            if (isDynamic)
+            if (!isDynamic.compareAndSet(false, true))
                 inactivate();
 
             //start a new round
             //noinspection unchecked
             (this.observer = observer).register(VALUES.keySet()).onModify(this::link).start();
-            isDynamic = true;
+            isDynamic.set(true);
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
         }
@@ -116,8 +116,8 @@ public class Dynamically<S, B, K, V> {
     public Dynamically<S, B, K, V> inactivate(Consumer<Throwable> errorHandler) {
         try {
             if (observer != null) {
-                observer.suspend();
-                isDynamic = false;
+                observer.reset();
+                isDynamic.set(false);
             }
         } catch (Throwable t) {
             errorHandler.accept(t);
@@ -181,7 +181,7 @@ public class Dynamically<S, B, K, V> {
      */
     public Dynamically<S, B, K, V> append(K k, V v, S s) {
         try {
-            if (isDynamic && VALUES.get(s) != null)
+            if (isDynamic.get() && VALUES.get(s) != null)
                 (appender == null ? appender = defaultAppender() : appender).accept(k, v, s);
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
@@ -194,7 +194,7 @@ public class Dynamically<S, B, K, V> {
      */
     public Dynamically<S, B, K, V> remove(K k, S s) {
         try {
-            if (isDynamic && VALUES.get(s) != null)
+            if (isDynamic.get() && VALUES.get(s) != null)
                 (eraser == null ? eraser = defaultEraser() : eraser).accept(k, s);
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
@@ -207,8 +207,7 @@ public class Dynamically<S, B, K, V> {
      * or override {@link Dynamically#defaultConvertor()}
      */
     public Dynamically<S, B, K, V> onConvert(Function<S, B> convertor) {
-        if (convertor != null)
-            this.convertor = convertor;
+        this.convertor = convertor;
         return this;
     }
 
@@ -217,8 +216,7 @@ public class Dynamically<S, B, K, V> {
      * or override  {@link Dynamically#defaultSearcher()}
      */
     public Dynamically<S, B, K, V> onSearch(BiFunction<K, B, V> searcher) {
-        if (searcher != null)
-            this.searcher = searcher;
+        this.searcher = searcher;
         return this;
     }
 
@@ -227,8 +225,7 @@ public class Dynamically<S, B, K, V> {
      * or override  {@link Dynamically#defaultErrorHandler()}
      */
     public Dynamically<S, B, K, V> onError(Consumer<Throwable> errorHandler) {
-        if (errorHandler != null)
-            this.commonErrorHandler = errorHandler;
+        this.commonErrorHandler = errorHandler;
         return this;
     }
 
@@ -237,8 +234,7 @@ public class Dynamically<S, B, K, V> {
      * or override  {@link Dynamically#defaultObserver()}
      */
     public Dynamically<S, B, K, V> onObserve(Observer<S, ? extends Closeable> observer) {
-        if (observer != null)
-            this.observer = observer;
+        this.observer = observer;
         return this;
     }
 
@@ -247,8 +243,7 @@ public class Dynamically<S, B, K, V> {
      * or override  {@link Dynamically#defaultObserver()}
      */
     public Dynamically<S, B, K, V> onAppend(TriConsumer<K, V, S> appender) {
-        if (appender != null)
-            this.appender = appender;
+        this.appender = appender;
         return this;
     }
 
@@ -257,8 +252,7 @@ public class Dynamically<S, B, K, V> {
      * or override  {@link Dynamically#defaultObserver()}
      */
     public Dynamically<S, B, K, V> onErase(BiConsumer<K, S> eraser) {
-        if (eraser != null)
-            this.eraser = eraser;
+        this.eraser = eraser;
         return this;
     }
 

@@ -22,7 +22,7 @@ import java.util.function.Function;
 @SuppressWarnings({"WeakerAccess", "unused", "UnusedReturnValue"})
 public class DynamicProperties extends DynamicFile<Properties, String, String> {
 
-    private DynamicProperties() {
+    protected DynamicProperties() {
     }
 
     public static Dynamically<Path, Properties, String, String> create() {

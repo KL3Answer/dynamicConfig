@@ -5,13 +5,12 @@ import java.io.IOException;
 import java.nio.file.WatchKey;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.logging.Logger;
 
 /**
  * Created by HQ.XPS15
@@ -19,6 +18,8 @@ import java.util.function.Supplier;
  */
 @SuppressWarnings({"WeakerAccess", "unused", "UnusedReturnValue"})
 public class Observer<O, W extends Closeable> {
+
+    private final Logger logger = Logger.getLogger(this.getClass().getName());
 
     protected volatile long minInterval = 50L;
 
@@ -28,17 +29,36 @@ public class Observer<O, W extends Closeable> {
 
     protected final ConcurrentMap<O, Long> TIMESTAMP = new ConcurrentHashMap<>();
 
-    protected final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
+    protected final ExecutorService EXECUTOR = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingDeque<>(Integer.MAX_VALUE),
+            new ThreadFactory() {
+                private final AtomicInteger threadNumber = new AtomicInteger(1);
+                private final String namePrefix = "Observer-notifier-";
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, namePrefix + threadNumber.getAndIncrement());
+                    t.setDaemon(true);
+                    return t;
+                }
+            },
+            (r, p) -> logger.info("runnable: " + r + " is discarded by pool:" + p)) {
+        @Override
+        protected void finalize() {
+            super.shutdown();
+            super.finalize();
+        }
+    };
 
     protected final ConcurrentMap<O, Consumer<O>> modifyHandlers = new ConcurrentHashMap<>();
     protected final ConcurrentMap<O, Consumer<O>> deleteHandlers = new ConcurrentHashMap<>();
     protected final ConcurrentMap<O, Consumer<O>> createHandlers = new ConcurrentHashMap<>();
 
-    protected volatile Consumer<O> commonModifyHandler = o -> System.out.printf("NOTICE:this message is printed due to no modify handler was set, event source:%s\n", o.toString());
+    protected volatile Consumer<O> commonModifyHandler = o -> logger.info("NOTICE:this message is printed due to no modify handler was set, event source:" + o);
 
-    protected volatile Consumer<O> commonDeleteHandler = o -> System.out.printf("NOTICE:this message is printed due to no delete handler was set, event source:%s\n", o.toString());
+    protected volatile Consumer<O> commonDeleteHandler = o -> logger.info("NOTICE:this message is printed due to no delete handler was set, event source:" + o);
 
-    protected volatile Consumer<O> commonCreateHandler = o -> System.out.printf("NOTICE:this message is printed due to no create handler was set, event source:%s\n", o.toString());
+    protected volatile Consumer<O> commonCreateHandler = o -> logger.info("NOTICE:this message is printed due to no create handler was set, event source:" + o);
 
     protected volatile RejectObserving<O> rejection = defaultRejection();
 
@@ -50,12 +70,17 @@ public class Observer<O, W extends Closeable> {
 
     protected volatile BiConsumer<O, RejectObserving<O>> register = null;
 
-    //mill second
+    /**
+     * mill second
+     */
     public Observer<O, W> setMinInterval(long ms) {
         this.minInterval = ms;
         return this;
     }
 
+    /**
+     * batch notify
+     */
     public Observer<O, W> setBatchSize(int batch) {
         this.bathSize = batch;
         return this;
@@ -68,8 +93,6 @@ public class Observer<O, W extends Closeable> {
 
     @SuppressWarnings("unchecked")
     public Observer<O, W> register(RejectObserving<O> reject, O... observables) {
-        if (observables == null || observables.length == 0)
-            return this;
         return register(reject, Arrays.asList(observables));
     }
 
@@ -78,8 +101,6 @@ public class Observer<O, W extends Closeable> {
     }
 
     public Observer<O, W> register(RejectObserving<O> reject, Collection<O> observables) {
-        if (observables == null || observables.size() == 0)
-            return this;
         for (O o : observables)
             register(o, reject);
         return this;
@@ -90,7 +111,7 @@ public class Observer<O, W extends Closeable> {
         return this;
     }
 
-    public void start() {
+    public void start() throws InterruptedException {
         //start this round
         EXECUTOR.execute(notifier == null ? notifier = defaultNotifier() : notifier);
     }
@@ -98,9 +119,11 @@ public class Observer<O, W extends Closeable> {
     public void stop() throws IOException {
         if (watchService != null)
             watchService.close();
+        WATCHED_PATH.clear();
+        TIMESTAMP.clear();
     }
 
-    public void suspend() throws IOException {
+    public void reset() throws IOException {
         stop();
         //so that it can be recovered
         watchService = watchServiceSupplier == null ? (watchServiceSupplier = defaultWatchServiceSupplier()).get() : watchServiceSupplier.get();

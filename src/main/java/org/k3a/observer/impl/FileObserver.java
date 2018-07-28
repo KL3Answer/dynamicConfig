@@ -1,6 +1,11 @@
-package org.k3a.observer;
+package org.k3a.observer.impl;
+
+import org.k3a.observer.LocalFileSystemObserver;
+import org.k3a.observer.Observer;
+import org.k3a.observer.RejectObserving;
 
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -11,7 +16,7 @@ import java.util.function.Supplier;
 @SuppressWarnings({"unused", "WeakerAccess"})
 public class FileObserver extends LocalFileSystemObserver {
 
-    private FileObserver() {
+    protected FileObserver() {
     }
 
     public FileObserver(Supplier<WatchService> s) {
@@ -63,19 +68,19 @@ public class FileObserver extends LocalFileSystemObserver {
                         if (!TIMESTAMP.keySet().contains(fullPath)) continue;
                         //ignore double update
                         final Long lastModified = TIMESTAMP.get(fullPath);
-                        final long thisModified = fullPath.toFile().lastModified();
-                        if (lastModified != null && lastModified < thisModified) {
+                        final long thisModified = Files.getLastModifiedTime(fullPath).toMillis();
+                        if (lastModified < thisModified) {
                             try {
-                                commonOnChangeHandler().accept(fullPath,event);
+                                commonOnChangeHandler().accept(fullPath, event);
                             } finally {
                                 TIMESTAMP.put(fullPath, thisModified);
                             }
                         }
                     }
-                } catch (ClosedWatchServiceException e) {
-                    //break this round observing and return from this Thread
+                } catch (ClosedWatchServiceException | InterruptedException e) {
+                    //break observing and return from this Thread
                     break;
-                } catch (InterruptedException ignore) {
+                } catch (Exception ignore) {
                 } finally {
                     if (take != null)
                         take.reset();
@@ -87,15 +92,16 @@ public class FileObserver extends LocalFileSystemObserver {
     @Override
     public BiConsumer<Path, RejectObserving<Path>> defaultRegistry() {
         return (path, reject) -> {
-            Path parent = path.getParent();
-            if (parent == null || !path.toFile().isFile()) {
-                reject.reject(path);
-                return;
-            }
-
             try {
+                BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class);
+                if (!attributes.isRegularFile()) {
+                    reject.reject(path);
+                    return;
+                }
+
+                final Path parent = path.getParent();
                 WATCHED_PATH.put(parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), parent);
-                TIMESTAMP.put(path, path.toFile().lastModified());
+                TIMESTAMP.put(path, attributes.lastModifiedTime().toMillis());
             } catch (Exception e) {
                 reject.reject(path);
             }
