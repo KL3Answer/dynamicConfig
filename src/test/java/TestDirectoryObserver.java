@@ -6,7 +6,7 @@ import java.nio.file.Paths;
  * Created by HQ.XPS15
  * on 2018/7/27  9:19
  */
-public class Test02 {
+public class TestDirectoryObserver {
 
     public static void main(String[] args) throws InterruptedException {
         long start = System.currentTimeMillis();
