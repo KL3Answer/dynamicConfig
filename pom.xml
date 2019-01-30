@@ -6,7 +6,7 @@
 
     <groupId>com.github.kl3answer</groupId>
     <artifactId>dynamicConfig</artifactId>
-    <version>1.0.1.6</version>
+    <version>1.0.1.8</version>
 
     <build>
         <plugins>

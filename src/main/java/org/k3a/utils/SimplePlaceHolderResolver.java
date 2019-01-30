@@ -43,6 +43,26 @@ public class SimplePlaceHolderResolver {
         return pre + mid + resolvePropertiesPlaceHolder(properties, key.substring(pair[1] + endChars.length()));
     }
 
+    public String resolveGenericPlaceHolder(Map<?, ?> map, final String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        final int[] pair = get1stPair(startChars, endChars, key);
+        //return origin key when placeHolder pair not found
+        if (pair[0] == -1 || pair[1] == -1) {
+            return key;
+        }
+
+        final String pre = key.substring(0, pair[0]);
+        final String replacement = resolveGenericPlaceHolder(map, key.substring(pair[0] + startChars.length(), pair[1]));
+        final String mid = String.valueOf(map.get(replacement));
+        if (mid == null || mid.isEmpty()) {
+            throw new IllegalArgumentException("malformed placeHolder value:" + startChars + replacement + endChars);
+        }
+
+        return pre + mid + resolveGenericPlaceHolder(map, key.substring(pair[1] + endChars.length()));
+    }
+
     /**
      * resolve placeHolder
      */

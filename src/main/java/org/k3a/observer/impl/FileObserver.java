@@ -3,8 +3,6 @@ package org.k3a.observer.impl;
 import org.k3a.observer.LocalFileSystemObserver;
 import org.k3a.observer.Observer;
 import org.k3a.observer.RejectObserving;
-import org.k3a.observer.SensitivityWatchEventModifier;
-import org.k3a.utils.SysHelper;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -129,13 +127,8 @@ public class FileObserver extends LocalFileSystemObserver {
 
                 final Path parent = path.getParent();
 
-                if (SysHelper.isMacOs()) {
-                    parent.register(watchService, new WatchEvent.Kind<?>[]{StandardWatchEventKinds.ENTRY_CREATE,
-                            StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE}, SensitivityWatchEventModifier.HIGH);
-                } else {
-                    parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY,
-                            StandardWatchEventKinds.ENTRY_DELETE);
-                }
+                parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY,
+                        StandardWatchEventKinds.ENTRY_DELETE);
                 long lastModifiedTime = attributes.lastModifiedTime().toMillis();
                 TIMESTAMP.put(path, new Long[]{lastModifiedTime, lastModifiedTime, lastModifiedTime});
             } catch (Exception e) {
