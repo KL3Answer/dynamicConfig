@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/7/1  15:35
  */
 @SuppressWarnings("unused")
@@ -22,7 +22,7 @@ public class DynamicConfigFactory {
                     try (FileInputStream fis = new FileInputStream(f.toFile())) {
                         Properties properties = new Properties();
                         properties.load(fis);
-                        properties.forEach((k, v) -> properties.setProperty((String) k, SimplePlaceHolderResolver.resolvePlaceHolder(properties, (String) k, (String) v)));
+                        properties.forEach((k, v) -> properties.setProperty((String) k, SimplePlaceHolderResolver.DEFAULT.resolvePropertiesPlaceHolder(properties, (String) v)));
                         return properties;
                     } catch (Throwable t) {
                         throw new IllegalArgumentException(t);
@@ -33,7 +33,7 @@ public class DynamicConfigFactory {
                 .onAppend((k, v, s) -> FileUtils.appendNewLine(k + "=" + v, s))
                 .onErase((k, s) -> {
                     try {
-                        FileUtils.write(FileUtils.readPropertiesExclusion(k, s), s);
+                        FileUtils.write(FileUtils.readPropertiesExcept(k, s), s);
                     } catch (IOException e) {
                         throw new IllegalArgumentException(e);
                     }

@@ -3,18 +3,28 @@ package org.k3a.observer.impl;
 import org.k3a.observer.LocalFileSystemObserver;
 import org.k3a.observer.Observer;
 import org.k3a.observer.RejectObserving;
+import org.k3a.observer.SensitivityWatchEventModifier;
+import org.k3a.utils.SysHelper;
 
+import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/6/22  12:03
  */
 @SuppressWarnings({"unused", "WeakerAccess"})
 public class FileObserver extends LocalFileSystemObserver {
+
+    private final List<Path> abandon = Collections.synchronizedList(new LinkedList<>());
 
     protected FileObserver() {
     }
@@ -55,32 +65,50 @@ public class FileObserver extends LocalFileSystemObserver {
     @Override
     protected Runnable defaultNotifier() {
         return () -> {
+            WatchKey take = null;
+            Path parent;
             do {
-                WatchKey take = null;
                 try {
                     take = watchService.take();
-                    final Path parent = WATCHED_PATH.get(take);
+                    parent = (Path) take.watchable();
+                    if (!take.isValid()) {
+                        unRegister(parent);
+                        LOGGER.log(Level.WARNING, "cancel invalid watchKey :" + take);
+                        continue;
+                    }
+
                     //ignore double update
                     Thread.sleep(minInterval);
                     for (WatchEvent<?> event : take.pollEvents()) {
                         final Path fullPath = parent.resolve((Path) event.context());
+                        //unRegister
+                        if (!abandon.isEmpty() && (abandon.contains(fullPath) || abandon.contains(parent))) {
+                            take.cancel();
+                            continue;
+                        }
                         //ignore non-registered
                         if (!TIMESTAMP.keySet().contains(fullPath)) continue;
                         //ignore double update
-                        final Long lastModified = TIMESTAMP.get(fullPath);
+                        final Long lastModified = TIMESTAMP.get(fullPath)[getEventOrder(event.kind())];
                         final long thisModified = Files.getLastModifiedTime(fullPath).toMillis();
                         if (lastModified < thisModified) {
                             try {
                                 commonOnChangeHandler().accept(fullPath, event);
                             } finally {
-                                TIMESTAMP.put(fullPath, thisModified);
+                                TIMESTAMP.get(fullPath)[getEventOrder(event.kind())] = thisModified;
                             }
                         }
                     }
                 } catch (ClosedWatchServiceException | InterruptedException e) {
                     //break observing and return from this Thread
                     break;
-                } catch (Exception ignore) {
+                } catch (NoSuchFileException e) {
+                    //usually happens when watched path is deleted
+                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                    take.cancel();
+                    unRegister((Path) take.watchable());
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
                 } finally {
                     if (take != null)
                         take.reset();
@@ -100,10 +128,40 @@ public class FileObserver extends LocalFileSystemObserver {
                 }
 
                 final Path parent = path.getParent();
-                WATCHED_PATH.put(parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), parent);
-                TIMESTAMP.put(path, attributes.lastModifiedTime().toMillis());
+
+                if (SysHelper.isMacOs()) {
+                    parent.register(watchService, new WatchEvent.Kind<?>[]{StandardWatchEventKinds.ENTRY_CREATE,
+                            StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE}, SensitivityWatchEventModifier.HIGH);
+                } else {
+                    parent.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY,
+                            StandardWatchEventKinds.ENTRY_DELETE);
+                }
+                long lastModifiedTime = attributes.lastModifiedTime().toMillis();
+                TIMESTAMP.put(path, new Long[]{lastModifiedTime, lastModifiedTime, lastModifiedTime});
             } catch (Exception e) {
                 reject.reject(path);
+            }
+        };
+    }
+
+    @Override
+    public Consumer<Path> defaultCancel() {
+        return path -> {
+            try {
+                BasicFileAttributes fileAttributes = Files.readAttributes(path, BasicFileAttributes.class);
+                if (fileAttributes.isDirectory()) {
+                    TIMESTAMP.keySet().removeIf(k -> k.getParent().equals(path));
+                    abandon.add(path);
+                } else if (fileAttributes.isRegularFile()) {
+                    TIMESTAMP.remove(path);
+                    //unRegister the directory only if no files under this directory is registered
+                    Path parent = path.getParent();
+                    if (TIMESTAMP.keySet().stream().noneMatch(p -> p.getParent().equals(parent))) {
+                        abandon.add(path);
+                    }
+                }
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
             }
         };
     }

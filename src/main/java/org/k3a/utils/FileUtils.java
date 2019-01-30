@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.util.LinkedList;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/6/30  22:22
  */
 @SuppressWarnings("UnusedReturnValue")
@@ -31,12 +31,12 @@ public class FileUtils {
     /**
      * remove key line from properties file
      */
-    public static LinkedList<String> readPropertiesExclusion(final String key, Path path) throws IOException {
+    public static LinkedList<String> readPropertiesExcept(final String key, Path path) throws IOException {
         final LinkedList<String> list = new LinkedList<>();
         try (BufferedReader br = new BufferedReader(new FileReader(path.toFile()))) {
             String tmp = null;
             while ((tmp = br.readLine()) != null) {
-                if (tmp.replace(key, "").trim().startsWith("="))
+                if (tmp.trim().startsWith(key + "="))
                     continue;
                 list.add(tmp);
             }
@@ -45,7 +45,7 @@ public class FileUtils {
     }
 
 
-    public static LinkedList<String> readExclusion(final long lineNum, Path path) throws IOException {
+    public static LinkedList<String> readExcept(final long lineNum, Path path) throws IOException {
         final LinkedList<String> list = new LinkedList<>();
         try (BufferedReader br = new BufferedReader(new FileReader(path.toFile()))) {
             int currentNum = 0;

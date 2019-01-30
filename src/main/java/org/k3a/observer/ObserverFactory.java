@@ -4,10 +4,24 @@ import java.nio.file.*;
 import java.util.function.Consumer;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/7/27  0:14
  */
 public class ObserverFactory {
+
+    @SuppressWarnings("Duplicates")
+    protected static int getEventOrder(WatchEvent.Kind<?> kind) {
+        switch (kind.name()) {
+            case "ENTRY_MODIFY":
+                return 0;
+            case "ENTRY_DELETE":
+                return 1;
+            case "ENTRY_CREATE":
+                return 2;
+            default:
+                return 3;
+        }
+    }
 
     public static Observer<Path, WatchService> createFileObserver() {
         Observer<Path, WatchService> observer = new Observer<>();
@@ -18,8 +32,9 @@ public class ObserverFactory {
                         if (parent == null || !p.toFile().isFile()) {
                             r.reject(p);
                         } else {
-                            observer.WATCHED_PATH.put(parent.register(observer.watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), parent);
-                            observer.TIMESTAMP.put(p, p.toFile().lastModified());
+                            parent.register(observer.watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
+                            long lastModified = p.toFile().lastModified();
+                            observer.TIMESTAMP.put(p, new Long[]{lastModified, lastModified, lastModified});
                         }
                     } catch (Exception e) {
                         r.reject(p);
@@ -35,14 +50,14 @@ public class ObserverFactory {
                         WatchKey take = null;
                         try {
                             take = observer.watchService.take();
-                            Path parent = observer.WATCHED_PATH.get(take);
+                            Path parent = (Path) take.watchable();
                             //ignore double update
                             Thread.sleep(50);
                             for (WatchEvent<?> event : take.pollEvents()) {
                                 final Path fullPath = parent.resolve((Path) event.context());
                                 if (!observer.TIMESTAMP.keySet().contains(fullPath)) continue;
                                 //ignore double update
-                                final Long lastModified = observer.TIMESTAMP.get(fullPath);
+                                final Long lastModified = observer.TIMESTAMP.get(fullPath)[getEventOrder(event.kind())];
                                 final long thisModified = fullPath.toFile().lastModified();
                                 if (lastModified != null && lastModified < thisModified) {
                                     try {
@@ -55,12 +70,12 @@ public class ObserverFactory {
                                         else if (StandardWatchEventKinds.ENTRY_CREATE.equals(kind))
                                             ((consumer = observer.createHandlers.get(fullPath)) == null ? observer.commonCreateHandler : consumer).accept(fullPath);
                                     } finally {
-                                        observer.TIMESTAMP.put(fullPath, thisModified);
+                                        observer.TIMESTAMP.get(fullPath)[getEventOrder(event.kind())] = thisModified;
                                     }
                                 }
                             }
                         } catch (ClosedWatchServiceException e) {
-                            //break this round observing and return from this Thread
+                            //break this round observing and return from this Thread because this key is invalid now
                             break;
                         } catch (InterruptedException ignore) {
                         } finally {

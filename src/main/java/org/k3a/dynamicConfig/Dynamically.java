@@ -1,7 +1,7 @@
 package org.k3a.dynamicConfig;
 
-import org.k3a.utils.TriConsumer;
 import org.k3a.observer.Observer;
+import org.k3a.utils.TriConsumer;
 
 import java.io.Closeable;
 import java.util.Arrays;
@@ -15,7 +15,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/6/29  13:18
  */
 @SuppressWarnings({"WeakerAccess", "unused", "UnusedReturnValue"})
@@ -25,7 +25,7 @@ public class Dynamically<S, B, K, V> {
 
     protected volatile Consumer<Throwable> commonErrorHandler = defaultErrorHandler();
 
-    protected volatile Function<S, B> convertor = null;
+    protected volatile Function<S, B> converter = null;
 
     protected volatile BiFunction<K, B, V> searcher = null;
 
@@ -35,14 +35,15 @@ public class Dynamically<S, B, K, V> {
 
     protected volatile BiConsumer<K, S> eraser = null;
 
-    protected volatile AtomicBoolean isDynamic = new AtomicBoolean(false);
+    protected final AtomicBoolean isDynamic = new AtomicBoolean(false);
+
 
     /**
      * link sources
      */
     public Dynamically<S, B, K, V> link(S s, Consumer<Throwable> errorHandler) {
         try {
-            B b = (convertor == null ? convertor = defaultConvertor() : convertor).apply(s);
+            B b = (converter == null ? converter = defaultConverter() : converter).apply(s);
             VALUES.put(s, b);
         } catch (Throwable t) {
             VALUES.remove(s);
@@ -88,15 +89,29 @@ public class Dynamically<S, B, K, V> {
      * start isDynamic registered sources
      */
     public Dynamically<S, B, K, V> activate(Observer<S, ? extends Closeable> observer) {
+        return activate(observer, false);
+    }
+
+    /**
+     * start isDynamic registered sources
+     */
+    public Dynamically<S, B, K, V> activate(Observer<S, ? extends Closeable> observer, boolean customAction) {
         try {
             // stop previous round
-            if (!isDynamic.compareAndSet(false, true))
+            if (isDynamic.compareAndSet(true, false))
                 inactivate();
 
             //start a new round
-            //noinspection unchecked
-            (this.observer = observer).register(VALUES.keySet()).onModify(this::link).start();
-            isDynamic.set(true);
+            if (customAction) {
+                (this.observer = observer).start();
+            } else {
+                //noinspection unchecked
+                (this.observer = observer).register(VALUES.keySet())
+                        .onModify(this::link)
+                        .onCreate(this::link)
+                        .onDelete(this::link)
+                        .start();
+            }
         } catch (Throwable t) {
             commonErrorHandler.accept(t);
         }
@@ -115,9 +130,8 @@ public class Dynamically<S, B, K, V> {
      */
     public Dynamically<S, B, K, V> inactivate(Consumer<Throwable> errorHandler) {
         try {
-            if (observer != null) {
+            if (observer != null && isDynamic.compareAndSet(true, false)) {
                 observer.reset();
-                isDynamic.set(false);
             }
         } catch (Throwable t) {
             errorHandler.accept(t);
@@ -176,6 +190,10 @@ public class Dynamically<S, B, K, V> {
         return null;
     }
 
+    public Map<S, B> getAllValues() {
+        return VALUES;
+    }
+
     /**
      *
      */
@@ -204,10 +222,10 @@ public class Dynamically<S, B, K, V> {
 
     /**
      * use this to decide how to covert file to B
-     * or override {@link Dynamically#defaultConvertor()}
+     * or override {@link Dynamically#defaultConverter()}
      */
     public Dynamically<S, B, K, V> onConvert(Function<S, B> convertor) {
-        this.convertor = convertor;
+        this.converter = convertor;
         return this;
     }
 
@@ -268,8 +286,8 @@ public class Dynamically<S, B, K, V> {
      * override this to decide how to covert file to B
      * or use {@link Dynamically#onConvert(Function)}
      */
-    protected Function<S, B> defaultConvertor() {
-        throw new IllegalStateException("convertor is required but has not been set up yet!");
+    protected Function<S, B> defaultConverter() {
+        throw new IllegalStateException("converter is required but has not been set up yet!");
     }
 
     /**

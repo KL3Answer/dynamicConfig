@@ -2,19 +2,23 @@ package org.k3a.observer.impl;
 
 import org.k3a.observer.LocalFileSystemObserver;
 import org.k3a.observer.RejectObserving;
+import org.k3a.observer.SensitivityWatchEventModifier;
+import org.k3a.utils.SysHelper;
 
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
+import java.util.logging.Level;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/7/27  1:24
  * <p>
  * Watch the change of Directory
@@ -22,31 +26,11 @@ import java.util.logging.Logger;
 @SuppressWarnings({"WeakerAccess", "UnusedReturnValue"})
 public class DirectoryObserver extends LocalFileSystemObserver {
 
-    protected final int coreSize = Runtime.getRuntime().availableProcessors();
-
     protected final Set<Path> recursively = new ConcurrentSkipListSet<>();
-
-    protected final List<CompletableFuture<?>> tasks = Collections.synchronizedList(new LinkedList<>());
-
-    protected ExecutorService regNewDir = new ThreadPoolExecutor(coreSize, coreSize, 60L, TimeUnit.MILLISECONDS,
-            new LinkedBlockingDeque<>(Integer.MAX_VALUE),
-            new ThreadFactory() {
-                private final AtomicInteger threadNumber = new AtomicInteger(1);
-                private final String namePrefix = "DirectoryObserver-register-";
-
-                @Override
-                public Thread newThread(Runnable r) {
-                    Thread t = new Thread(r, namePrefix + threadNumber.getAndIncrement());
-                    t.setDaemon(true);
-                    return t;
-                }
-            }, (r, p) -> Logger.getLogger(this.getClass().getName()).info("runnable: " + r + " is discarded by pool:" + p));
 
     protected final AtomicInteger eventNum = new AtomicInteger(0);
 
     protected DirectoryObserver() {
-        //if FJP is already init then this will not work
-//        System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", Integer.toString(coreSize /** 2*/));
     }
 
     public static DirectoryObserver get() {
@@ -63,6 +47,7 @@ public class DirectoryObserver extends LocalFileSystemObserver {
             f.join();
             recursively.add(path);
         } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
             reject.reject(path);
         }
     }
@@ -82,6 +67,18 @@ public class DirectoryObserver extends LocalFileSystemObserver {
     public void start() throws InterruptedException {
         CompletableFuture.allOf(tasks.toArray(new CompletableFuture[]{})).join();
         super.start();
+        tasks.clear();
+    }
+
+    @Override
+    public void startAsync() {
+        regNewDirExecutor.execute(() -> {
+            try {
+                start();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     @Override
@@ -98,47 +95,73 @@ public class DirectoryObserver extends LocalFileSystemObserver {
     @Override
     protected Runnable defaultNotifier() {
         return () -> {
+            WatchKey take = null;
+            Path path;
             do {
-                WatchKey take = null;
                 try {
                     take = watchService.take();
-                    final Path path = WATCHED_PATH.get(take);
+                    path = (Path) take.watchable();
+
+                    if (!take.isValid() || !TIMESTAMP.containsKey(path)) {
+                        take.cancel();
+                        unRegister(path);
+                        LOGGER.log(Level.WARNING, "cancel invalid watchKey :" + take);
+                        continue;
+                    }
+
                     //ignore double update
                     Thread.sleep(minInterval);
+
+                    //handle events
+                    Long lastModified;
                     for (WatchEvent<?> event : take.pollEvents()) {
-                        //no need to get event full path
-//                        final Path fullPath = path.resolve((Path) event.context());
-                        //ignore non-registered
-                        if (!TIMESTAMP.keySet().contains(path)) continue;
+                        final Long[] lastModifiedArr = TIMESTAMP.get(path);
+                        lastModified = lastModifiedArr[getEventOrder(event.kind())];
+                        final long thisModified = Files.readAttributes(path, BasicFileAttributes.class).lastModifiedTime().toMillis();
                         //ignore double update
-                        final Long lastModified = TIMESTAMP.get(path);
-                        final BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class);
-                        final long thisModified = attributes.lastModifiedTime().toMillis();
                         if (lastModified != null && lastModified < thisModified && eventNum.incrementAndGet() == bathSize) {
                             try {
                                 commonOnChangeHandler().accept(path, event);
                             } finally {
-                                TIMESTAMP.put(path, thisModified);
+                                lastModifiedArr[getEventOrder(event.kind())] = thisModified;
                                 eventNum.set(0);
-                                //register new path
-                                if (StandardWatchEventKinds.ENTRY_CREATE.equals(event.kind()) && attributes.isDirectory())
-                                    if (recursively.contains(path))
-                                        regNewDir.execute(() -> registerRecursively(path));
-                                    else
-                                        regNewDir.execute(() -> register(path));
+                                postEventHandler(take, event, path, path.resolve((Path) event.context()));
                             }
                         }
                     }
                 } catch (ClosedWatchServiceException | InterruptedException e) {
                     //break this round observing and return from this Thread
                     break;
-                } catch (Exception ignore) {
+                } catch (NoSuchFileException e) {
+                    //usually happens when watched path is deleted
+                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                    take.cancel();
+                    unRegister((Path) take.watchable());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
                 } finally {
                     if (take != null)
                         take.reset();
                 }
             } while (true);
         };
+    }
+
+    /**
+     * register new path or cancel deleted key
+     */
+    @Override
+    protected void postEventHandler(WatchKey take, WatchEvent<?> event, Path path, Path contextPath) {
+        if (StandardWatchEventKinds.ENTRY_CREATE.equals(event.kind()) && contextPath.toFile().isDirectory()) {
+            if (recursively.contains(path))
+                regNewDirExecutor.execute(() -> registerRecursively(contextPath));
+            else
+                regNewDirExecutor.execute(() -> register(contextPath));
+        } else if (StandardWatchEventKinds.ENTRY_DELETE.equals(event.kind())) {
+            take.cancel();
+            unRegister(contextPath);
+        }
     }
 
     @Override
@@ -156,11 +179,27 @@ public class DirectoryObserver extends LocalFileSystemObserver {
                     reject.reject(path);
                     return;
                 }
-                WATCHED_PATH.put(path.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE), path);
-                TIMESTAMP.put(path, attributes.lastModifiedTime().toMillis());
+                if (SysHelper.isMacOs()) {
+                    path.register(watchService, new WatchEvent.Kind<?>[]{StandardWatchEventKinds.ENTRY_CREATE,
+                            StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE}, SensitivityWatchEventModifier.HIGH);
+                } else {
+                    path.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY,
+                            StandardWatchEventKinds.ENTRY_DELETE);
+                }
+                long lastModifiedTime = attributes.lastModifiedTime().toMillis();
+                TIMESTAMP.put(path, new Long[]{lastModifiedTime, lastModifiedTime, lastModifiedTime});
             } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
                 reject.reject(path);
             }
+        };
+    }
+
+    @Override
+    public Consumer<Path> defaultCancel() {
+        return path -> {
+            recursively.remove(path);
+            TIMESTAMP.remove(path);
         };
     }
 }

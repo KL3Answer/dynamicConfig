@@ -8,11 +8,25 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
- * Created by HQ.XPS15
+ * Created by  k3a
  * on 2018/7/27  9:39
  */
 @SuppressWarnings("WeakerAccess")
 public abstract class LocalFileSystemObserver extends Observer<Path, WatchService> {
+
+    @SuppressWarnings("Duplicates")
+    protected int getEventOrder(WatchEvent.Kind<?> kind) {
+        switch (kind.name()) {
+            case "ENTRY_MODIFY":
+                return 0;
+            case "ENTRY_DELETE":
+                return 1;
+            case "ENTRY_CREATE":
+                return 2;
+            default:
+                return 3;
+        }
+    }
 
     @Override
     protected RejectObserving<Path> defaultRejection() {
