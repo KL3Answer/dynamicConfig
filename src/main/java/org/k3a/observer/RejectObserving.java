@@ -1,6 +1,7 @@
 package org.k3a.observer;
 
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Created by  k3a
@@ -9,7 +10,7 @@ import java.util.logging.Logger;
 @SuppressWarnings("unused")
 public interface RejectObserving<T> {
 
-    Logger LOGGER = Logger.getLogger(RejectObserving.class.getName());
+    final Logger LOGGER = LoggerFactory.getLogger(RejectObserving.class);
 
     void reject(T t);
 

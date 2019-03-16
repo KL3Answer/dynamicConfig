@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.logging.Level;
 
 /**
  * Created by  k3a
@@ -71,7 +70,7 @@ public class FileObserver extends LocalFileSystemObserver {
                     parent = (Path) take.watchable();
                     if (!take.isValid()) {
                         unRegister(parent);
-                        LOGGER.log(Level.WARNING, "cancel invalid watchKey :" + take);
+                        LOGGER.warn("cancel invalid watchKey :{}", take);
                         continue;
                     }
 
@@ -102,11 +101,11 @@ public class FileObserver extends LocalFileSystemObserver {
                     break;
                 } catch (NoSuchFileException e) {
                     //usually happens when watched path is deleted
-                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                    LOGGER.warn("registered file not found,maybe deleted?", e);
                     take.cancel();
                     unRegister((Path) take.watchable());
                 } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                    LOGGER.warn("notify error", e);
                 } finally {
                     if (take != null)
                         take.reset();
@@ -154,7 +153,7 @@ public class FileObserver extends LocalFileSystemObserver {
                     }
                 }
             } catch (IOException e) {
-                LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                LOGGER.warn("register error", e);
             }
         };
     }

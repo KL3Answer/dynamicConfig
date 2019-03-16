@@ -1,5 +1,8 @@
 package org.k3a.observer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -12,7 +15,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
 
 /**
  * Created by  k3a
@@ -23,7 +25,7 @@ public class Observer<O, W extends Closeable> {
 
     protected final AtomicBoolean running = new AtomicBoolean(false);
 
-    protected final Logger LOGGER = Logger.getLogger(this.getClass().getName());
+    protected final Logger LOGGER = LoggerFactory.getLogger(this.getClass());
 
     protected volatile long minInterval = 50L;
 
@@ -67,7 +69,7 @@ public class Observer<O, W extends Closeable> {
                             return t;
                         }
                     },
-                    (r, p) -> Logger.getLogger(this.getClass().getName()).info("runnable: " + r + " is discarded by pool:" + p));
+                    (r, p) -> LOGGER.info("runnable: " + r + " is discarded by pool:" + p));
 
     protected volatile ExecutorService regNewDirExecutor = regNewDirSupplier.get();
 

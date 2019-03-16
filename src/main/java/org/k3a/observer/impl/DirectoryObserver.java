@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.logging.Level;
 
 /**
  * Created by  k3a
@@ -45,7 +44,7 @@ public class DirectoryObserver extends LocalFileSystemObserver {
             f.join();
             recursively.add(path);
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+            LOGGER.warn("recursiveRegister error", e);
             reject.reject(path);
         }
     }
@@ -56,7 +55,6 @@ public class DirectoryObserver extends LocalFileSystemObserver {
     }
 
     public DirectoryObserver registerRecursively(Path path) {
-        //noinspection unchecked
         registerRecursively(path, defaultRejection());
         return this;
     }
@@ -103,7 +101,7 @@ public class DirectoryObserver extends LocalFileSystemObserver {
                     if (!take.isValid() || !TIMESTAMP.containsKey(path)) {
                         take.cancel();
                         unRegister(path);
-                        LOGGER.log(Level.WARNING, "cancel invalid watchKey :" + take);
+                        LOGGER.warn("cancel invalid watchKey {}", take);
                         continue;
                     }
 
@@ -132,12 +130,11 @@ public class DirectoryObserver extends LocalFileSystemObserver {
                     break;
                 } catch (NoSuchFileException e) {
                     //usually happens when watched path is deleted
-                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                    LOGGER.warn("registered file not found,maybe deleted?",e);
                     take.cancel();
                     unRegister((Path) take.watchable());
                 } catch (Exception e) {
-                    e.printStackTrace();
-                    LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                    LOGGER.warn("notify error", e);
                 } finally {
                     if (take != null)
                         take.reset();
@@ -182,7 +179,7 @@ public class DirectoryObserver extends LocalFileSystemObserver {
                 long lastModifiedTime = attributes.lastModifiedTime().toMillis();
                 TIMESTAMP.put(path, new Long[]{lastModifiedTime, lastModifiedTime, lastModifiedTime});
             } catch (IOException e) {
-                LOGGER.log(Level.WARNING, "\tat " + e.getStackTrace()[0]);
+                LOGGER.warn("register error",e);
                 reject.reject(path);
             }
         };

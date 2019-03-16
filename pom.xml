@@ -6,7 +6,16 @@
 
     <groupId>com.github.kl3answer</groupId>
     <artifactId>dynamicConfig</artifactId>
-    <version>1.0.1.8</version>
+    <version>1.0.2</version>
+
+    <dependencies>
+        <!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-api -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.26</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>
